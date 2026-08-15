@@ -4,6 +4,12 @@ A machine learning application that predicts the room type of a New York City Ai
 
 🔗 **Live Demo:** https://nyc-house-type-classification-1.onrender.com/
 
+
+<img width="240" height="240" alt="Video Project 2" src="https://github.com/user-attachments/assets/e8608014-f640-4848-9cd6-2075c9735b71" />
+
+
+
+
 ---
 
 ## 📌 What It Does
