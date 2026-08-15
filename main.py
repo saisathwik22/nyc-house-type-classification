@@ -49,5 +49,5 @@ def predict(features: Features):
 
     return {
         "Predicted_room_type": prediction[0],
-        "Probability": probability.toList()[0]
+        "Probability": probability.tolist()[0]
     }
