@@ -7,47 +7,50 @@ A machine learning application that predicts the room type of a New York City Ai
 ---
 
 ## 📌 What It Does
-- Input: The user provides key listing details — location (latitude/longitude), price per night, minimum nights required, number of reviews, reviews per month, number of other listings the host manages, yearly availability, and the NYC borough/neighbourhood.
 
-- Prediction: The model classifies the listing into one of three room types — Entire home/apt, Private room, or Shared room — based on patterns learned from real NYC Airbnb data.
-
-- Why it works: Each room type tends to have a distinct signature. Entire homes are usually priced higher and often belong to hosts managing multiple listings; shared rooms are typically cheaper and far less common. The model picks up on these correlations across price, location, and host behavior to make its prediction.
-
-- Confidence scores: Instead of returning a single flat answer, the app shows probability scores for all three room types — so the result reflects how confident the model is, not just its top guess. This makes the output more transparent and trustworthy than a plain black-box label.
-
-- Practical use cases:
-  - Auto-categorizing listings with missing or unclear room type labels
-  - Flagging inconsistencies — e.g. a listing marked "entire home" that behaves statistically like a shared room
-  - Helping hosts, platforms, or analysts understand which features (price, location, host activity) most influence how a listing is structured
+- **Input**: The user provides key listing details — location (latitude/longitude), price per night, minimum nights required, number of reviews, reviews per month, number of other listings the host manages, yearly availability, and the NYC borough/neighbourhood.
+- **Prediction**: The model classifies the listing into one of three room types — **Entire home/apt**, **Private room**, or **Shared room** — based on patterns learned from real NYC Airbnb data.
+- **Confidence scores**: Instead of a single flat answer, the app returns probability scores for all three room types, showing how confident the model is rather than just its top guess.
+- **Practical use cases**: auto-categorizing listings with missing labels, flagging inconsistencies (e.g. a listing marked "entire home" that behaves statistically like a shared room), or helping analysts understand what features drive how a listing is structured.
 
 ---
 
 ## 🧠 The Machine Learning Pipeline
 
 ### 1. Data Loading & Initial Exploration
-- Dataset: NYC Airbnb listings, loaded via `kagglehub` into a Pandas DataFrame.
-- Initial inspection with `df.head()`, `df.info()`, `df.describe()`, `df.shape`, and `df.isnull().sum()` to understand structure, types, and missing values.
-- Target variable (`room_type`) checked for class distribution — revealed **class imbalance**, with `Shared room` as a clear minority class.
+- Dataset: **NYC Airbnb Open Data** (48,895 listings, 16 columns), loaded via `kagglehub` into a Pandas DataFrame.
+- Initial inspection with `df.head()`, `df.info()`, `df.describe()`, `df.shape`, and `df.isnull().sum()`.
+- Missing values found in `name` (16), `host_name` (21), `last_review` (10,052), and `reviews_per_month` (10,052).
+- Target variable (`room_type`) distribution:
+
+  | Room Type | Count | Share |
+  |---|---|---|
+  | Entire home/apt | 25,409 | ~52.0% |
+  | Private room | 22,326 | ~45.7% |
+  | Shared room | 1,160 | ~2.4% |
+
+  This confirmed a **significant class imbalance**, with `Shared room` as a clear minority class — a key factor shaping every later modeling decision.
 
 ### 2. Exploratory Data Analysis (EDA)
-- **Numerical distributions**: histograms for `price`, `minimum_nights`, `number_of_reviews`, `reviews_per_month`, `calculated_host_listings_count`, and `availability_365` to check skew and outliers.
+- **Numerical distributions**: histograms for `price`, `minimum_nights`, `number_of_reviews`, `reviews_per_month`, `calculated_host_listings_count`, and `availability_365`.
+- **Skewness check**: all core numerical features were right-skewed — `price` (2.78), `minimum_nights` (2.36), `number_of_reviews` (3.69), `reviews_per_month` (3.30), `calculated_host_listings_count` (7.93), `availability_365` (0.76) — confirming the need for outlier handling and scaling.
 - **Categorical distribution**: count plot of `neighbourhood_group` across NYC boroughs.
 - **Room type vs. price**: box plot to compare pricing across room types and surface outliers.
-- **Correlation analysis**: heatmap of numerical features including latitude/longitude.
-- **Geographical distribution**: scatter plot of longitude vs. latitude, colored by room type, to visualize spatial concentration patterns across the city.
+- **Correlation analysis**: heatmap of numerical features, e.g. `reviews_per_month` correlated moderately with `number_of_reviews` (0.55), while most other pairwise correlations were weak.
+- **Geographical distribution**: scatter plots of longitude vs. latitude, colored by room type (with alpha/size tuning for readability), to visualize spatial concentration patterns across boroughs.
 
 ### 3. Data Cleaning & Feature Engineering
 - Dropped identifier/free-text columns with no generalizable predictive value: `id`, `name`, `host_id`, `host_name`, `last_review`.
 - Imputed missing `reviews_per_month` values with 0 (listings with no reviews assumed to have no review rate).
-- Capped extreme outliers in `price` and `minimum_nights` at the 99th percentile using `.clip(upper=quantile(0.99))`, reducing the influence of likely data-entry errors while preserving overall distribution shape.
+- Capped extreme outliers in `price` and `minimum_nights` at the **99th percentile** using `.clip(upper=quantile(0.99))`, reducing the influence of likely data-entry errors while preserving the overall distribution shape.
 - Split into features (`X`) and target (`y = room_type`).
 
 ### 4. Train/Test Split
 - `train_test_split` with `test_size=0.33`, `random_state=42`.
-- `stratify=y` used to preserve class proportions in both sets — important given the class imbalance.
+- `stratify=y` used to preserve the ~52/46/2 class proportions in both sets — critical given the imbalance.
 
 ### 5. Preprocessing Pipeline (`ColumnTransformer`)
-Built as a single leak-proof pipeline so all transformations are learned only from training data:
+Built as a single pipeline so all transformations are learned only from training data (no leakage):
 
 | Feature type | Steps |
 |---|---|
@@ -55,34 +58,39 @@ Built as a single leak-proof pipeline so all transformations are learned only fr
 | Categorical (`neighbourhood_group`, `neighbourhood`) | `SimpleImputer(strategy='most_frequent')` → `OneHotEncoder(handle_unknown='ignore')` |
 
 ### 6. Model Comparison
-Four classifiers evaluated, each wrapped in a full pipeline with the preprocessor:
+Four classifiers were evaluated, each wrapped in a full pipeline with the shared preprocessor. `class_weight="balanced"` was applied where supported (Gradient Boosting doesn't support it, so it was left as-is) to counter the minority-class imbalance. Models were compared via **3-fold stratified cross-validation**, scored on both accuracy and **macro F1** (macro F1 weighs all three classes equally, which matters far more than accuracy here given how rare `Shared room` is):
 
-| Model | Notes |
-|---|---|
-| Logistic Regression | Linear baseline |
-| Decision Tree Classifier | Non-linear, prone to overfitting |
-| Random Forest Classifier | Ensemble method |
-| Gradient Boosting Classifier | Ensemble method |
+| Model | Accuracy | Macro F1 |
+|---|---|---|
+| Logistic Regression | 65.9% | 52.2% |
+| Decision Tree | 78.2% | 64.7% |
+| **Random Forest** | **85.1%** | **71.5%** |
+| Gradient Boosting | 85.0% | 70.5% |
 
-- `class_weight="balanced"` applied where supported to counter the minority-class imbalance.
-- Evaluated via **3-fold stratified cross-validation** on both `accuracy` and `f1_macro` (macro F1 treats all classes equally, which matters given the imbalance).
-- **Random Forest and Gradient Boosting** produced the best macro F1 scores.
+**Random Forest** was selected as the best-performing model, narrowly ahead of Gradient Boosting on macro F1.
 
 ### 7. Hyperparameter Tuning
-- **Random Forest Classifier** selected for tuning based on comparison results.
-- Tuned with `RandomizedSearchCV` (`n_iter=10`), optimizing for `f1_macro`.
-- Parameters searched:
+- Random Forest tuned using `RandomizedSearchCV` (`n_iter` search over the grid below, `cv=3`), optimizing for `f1_macro`.
+- Search space:
   - `n_estimators`: 100, 150, 200, 300
-  - `max_depth`: 8, 12, 15, 20, or unlimited
+  - `max_depth`: 8, 12, 15, 20, or unlimited (`None`)
   - `min_samples_split`: 2, 5, 10
+- **Best parameters found**: `n_estimators=200`, `max_depth=None`, `min_samples_split=10`
+- **Best cross-validated macro F1**: **73.06%**
 
 ### 8. Final Model Evaluation
-- Best pipeline evaluated on the held-out test set (`X_test`) using `accuracy_score` and `f1_score(average='macro')`.
-- Confusion matrix generated and visualized to inspect per-class performance, with particular attention to the minority `Shared room` class.
+Evaluated on the held-out test set (16,136 listings):
+
+| Metric | Score |
+|---|---|
+| Accuracy | **85.43%** |
+| Macro F1 | **73.42%** |
+
+A confusion matrix (with class labels) was generated to inspect per-class performance in detail, with particular attention to how well the model distinguishes the minority `Shared room` class from `Private room`.
 
 ### 9. Model Saving
 - The full pipeline — preprocessing + tuned Random Forest — serialized with `joblib.dump()` as `Model_Pipeline.pkl`.
-- Saving the entire pipeline (not just the model) ensures preprocessing is applied identically at inference time, avoiding train/serve skew.
+- Saving the entire pipeline (not just the raw model) ensures preprocessing is applied identically at inference time, avoiding train/serve skew.
 
 ---
 
@@ -188,3 +196,7 @@ house_types_classification/
 ```
 
 ---
+
+## 📝 License
+
+Provided as-is for educational purposes.
